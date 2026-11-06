@@ -4,12 +4,14 @@ import { Header } from './components/Header'
 import { BoardPage } from './pages/BoardPage'
 import { LoginPage } from './pages/LoginPage'
 import { ProjectsPage } from './pages/ProjectsPage'
+import { VerifyEmailPage } from './pages/VerifyEmailPage'
 
 export default function App() {
   const { user, loading } = useAuth()
 
   if (loading) return <div className="grid h-full place-items-center text-stone-500">Loading…</div>
   if (!user) return <LoginPage />
+  if (!user.emailVerified) return <VerifyEmailPage />
 
   return (
     <div className="flex h-full flex-col">

@@ -1,0 +1,58 @@
+name: Deploy to Firebase
+
+# Every push to main builds the app and deploys Hosting + Firestore rules/indexes.
+# One-time setup (see README > Go live):
+#   - repository variable FIREBASE_PROJECT_ID   (e.g. peak-stoneworkz)
+#   - repository secret   FIREBASE_SERVICE_ACCOUNT (JSON key of a deploy service account)
+#   - optional variable   ALLOWED_DOMAIN        (e.g. peakstoneworkz.com: only these emails can sign up)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: firebase-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    # Skipped (not failed) until the project ID variable is configured.
+    if: ${{ vars.FIREBASE_PROJECT_ID != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build
+        run: npm run build
+        env:
+          VITE_ALLOWED_DOMAIN: ${{ vars.ALLOWED_DOMAIN }}
+
+      - name: Write service account key
+        env:
+          SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$SERVICE_ACCOUNT" ]; then
+            echo "::error::Missing repository secret FIREBASE_SERVICE_ACCOUNT (see README > Go live)."
+            exit 1
+          fi
+          printf '%s' "$SERVICE_ACCOUNT" > "$RUNNER_TEMP/service-account.json"
+
+      - name: Deploy Hosting and Firestore rules/indexes
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/service-account.json
+        run: npx firebase deploy --only hosting,firestore --project "${{ vars.FIREBASE_PROJECT_ID }}" --non-interactive
+
+      - name: Remove key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/service-account.json"
