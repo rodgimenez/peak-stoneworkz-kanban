@@ -15,7 +15,7 @@ A Kanban / Jira-style board for Peak Stoneworkz, built with React + Vite + TypeS
 - Offline cache (keeps working on spotty Wi-Fi, syncs when back online)
 
 ## Run locally (no Firebase project needed)
-Requires Node 20+ and Java 11+ (for the emulators).
+Requires Node 24+ and Java 11+ (for the emulators).
 
 ```bash
 npm install
