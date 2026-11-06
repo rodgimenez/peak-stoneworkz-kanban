@@ -1,0 +1,90 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---- Helpers ----
+    function signedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+      // To lock the whole app to company accounts, replace the line above with:
+      // return request.auth != null && request.auth.token.email_verified == true
+      //   && request.auth.token.email.lower().matches('.*@peakstoneworkz[.]com$');
+    }
+    function myEmail() { return request.auth.token.email.lower(); }
+    function projectDoc(projectId) {
+      return get(/databases/$(database)/documents/projects/$(projectId)).data;
+    }
+    function isMember(projectId) {
+      return signedIn() && myEmail() in projectDoc(projectId).memberEmails;
+    }
+    function changedOnly(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+
+    // ---- Projects ----
+    match /projects/{projectId} {
+      allow read: if signedIn() && myEmail() in resource.data.memberEmails;
+
+      allow create: if signedIn()
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.memberEmails == [myEmail()]
+        && request.resource.data.cardCounter == 0
+        && request.resource.data.key is string
+        && request.resource.data.key.size() > 0 && request.resource.data.key.size() <= 6;
+
+      // Members can edit name/members and bump the card counter,
+      // but can't change the owner or the key.
+      allow update: if signedIn()
+        && myEmail() in resource.data.memberEmails
+        && changedOnly(['name', 'memberEmails', 'cardCounter'])
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.memberEmails.size() > 0
+        && request.resource.data.cardCounter >= resource.data.cardCounter;
+
+      allow delete: if signedIn() && resource.data.ownerUid == request.auth.uid;
+
+      // ---- Boards (each with its own columns) ----
+      match /boards/{boardId} {
+        function validBoard() {
+          let b = request.resource.data;
+          return b.name is string && b.name.size() > 0 && b.name.size() <= 100
+            && b.columns is list && b.columns.size() > 0 && b.columns.size() <= 30
+            && b.order is number;
+        }
+        allow read: if isMember(projectId);
+        allow create, update: if isMember(projectId) && validBoard();
+        allow delete: if isMember(projectId);
+      }
+
+      // ---- Cards ----
+      match /cards/{cardId} {
+        allow read: if isMember(projectId);
+        allow create: if isMember(projectId)
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.boardId is string
+          && exists(/databases/$(database)/documents/projects/$(projectId)/boards/$(request.resource.data.boardId))
+          && request.resource.data.title is string
+          && request.resource.data.title.size() > 0
+          && request.resource.data.title.size() <= 500;
+        allow update: if isMember(projectId)
+          && request.resource.data.number == resource.data.number
+          && request.resource.data.createdBy == resource.data.createdBy
+          && request.resource.data.get('blocked', false) is bool
+          && (request.resource.data.boardId == resource.data.boardId
+              || exists(/databases/$(database)/documents/projects/$(projectId)/boards/$(request.resource.data.boardId)));
+        allow delete: if isMember(projectId);
+
+        // ---- Comments ----
+        match /comments/{commentId} {
+          allow read: if isMember(projectId);
+          allow create: if isMember(projectId)
+            && request.resource.data.authorUid == request.auth.uid
+            && request.resource.data.text is string
+            && request.resource.data.text.size() <= 5000;
+          // Authors can delete their own comments; anyone deleting the parent card may clean them up.
+          allow delete: if isMember(projectId);
+        }
+      }
+    }
+  }
+}
